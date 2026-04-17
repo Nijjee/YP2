@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Бронирование номеров</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="auth">
+        <h2>Вход / Регистрация</h2>
+        <input type="text" id="login" placeholder="Логин">
+        <input type="password" id="password" placeholder="Пароль">
+        <input type="text" id="full_name" placeholder="ФИО (для регистрации)" style="display:none">
+        <input type="text" id="phone" placeholder="Телефон (для регистрации)" style="display:none">
+        <button onclick="login()">Войти</button>
+        <button onclick="toggleRegister()">Зарегистрироваться</button>
+    </div>
+    
+    <div id="client" style="display:none">
+        <h2>Доступные номера</h2>
+        <div id="rooms"></div>
+        <h2>Мои заявки</h2>
+        <div id="my_bookings"></div>
+        <button onclick="logout()">Выйти</button>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
