@@ -3,26 +3,37 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from database import engine, SessionLocal, get_db, Base
-from models import *
+from models import User, Client, Administrator, Room, Booking, Payment
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
 app = FastAPI()
+
+# Создаем таблицы в БД при запуске
 Base.metadata.create_all(bind=engine)
+
+# Подключение статических файлов (картинки, css, js)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Временное хранилище сессий (для авторизации)
 sessions = {}
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
+    """Получение текущего пользователя из куки"""
     token = request.cookies.get("session_token")
     if not token or token not in sessions:
         return None
+    
     user_data = sessions[token]
     if user_data["role"] == "client":
         client = db.query(Client).filter(Client.id == user_data["id"]).first()
         return {"type": "client", "data": client}
-    return {"type": "admin", "data": db.query(Administrator).filter(Administrator.id == user_data["id"]).first()}
+    else:
+        admin = db.query(Administrator).filter(Administrator.id == user_data["id"]).first()
+        return {"type": "admin", "data": admin}
+
+# Страница
 
 @app.get("/", response_class=HTMLResponse)
 def root():
@@ -34,104 +45,195 @@ def admin_panel():
     with open("static/admin.html", "r", encoding="utf-8") as f:
         return f.read()
 
+#Авторизация и регисстрация
+
 @app.post("/api/register")
-def register(login: str = Form(...), password: str = Form(...), full_name: str = Form(...), phone: str = Form(...), db: Session = Depends(get_db)):
+def register(
+    login: str = Form(...), 
+    password: str = Form(...), 
+    full_name: str = Form(...), 
+    phone: str = Form(...), 
+    db: Session = Depends(get_db)
+):
     if db.query(User).filter(User.login == login).first():
-        raise HTTPException(status_code=400, detail="Логин занят")
+        raise HTTPException(status_code=400, detail="Логин уже занят")
+    
+    # Создаем общую запись User
     user = User(login=login, password=password, role="client")
     db.add(user)
     db.flush()
+    
+    # Создаем профиль Клиента
     client = Client(id=user.id, full_name=full_name, phone=phone)
     db.add(client)
     db.commit()
+    
     return {"message": "Регистрация успешна"}
 
 @app.post("/api/login")
 def login(login: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.login == login, User.password == password).first()
     if not user:
-        raise HTTPException(status_code=401, detail="Неверный логин/пароль")
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    
+    # Генерируем токен сессии
     token = uuid.uuid4().hex
     sessions[token] = {"id": user.id, "role": user.role}
+    
     response = JSONResponse(content={"role": user.role})
     response.set_cookie(key="session_token", value=token, httponly=True)
     return response
+
+#Номера
 
 @app.get("/api/rooms")
 def get_rooms(db: Session = Depends(get_db)):
     return db.query(Room).all()
 
+#Бронирование (клиент)
+
 @app.post("/api/bookings")
-def create_booking(room_id: int = Form(...), date: str = Form(...), request: Request = None, db: Session = Depends(get_db)):
+def create_booking(
+    room_id: int = Form(...), 
+    date: str = Form(...), 
+    request: Request = None, 
+    db: Session = Depends(get_db)
+):
     user_info = get_current_user(request, db)
     if not user_info or user_info["type"] != "client":
-        raise HTTPException(status_code=403, detail="Требуется авторизация")
+        raise HTTPException(status_code=403, detail="Требуется авторизация как клиент")
+    
     client = user_info["data"]
-    room = db.query(Room).filter(Room.id == room_id).first()
-    if not room or not room.is_active:
+    room = db.query(Room).filter(Room.id == room_id, Room.is_active == True).first()
+    
+    if not room:
         raise HTTPException(status_code=400, detail="Номер недоступен")
+    
+    # Создаем бронь
     booking = Booking(
         client_id=client.id,
         room_id=room_id,
         date=date,
         fixed_price=room.price,
-        deadline=datetime.now() + timedelta(hours=24)
+        deadline=datetime.now() + timedelta(hours=24),
+        status="pending"
     )
     db.add(booking)
     db.flush()
-    payment = Payment(booking_id=booking.id, amount=room.price)
+    
+    # Создаем запись об оплате
+    payment = Payment(booking_id=booking.id, amount=room.price, status="unpaid")
     db.add(payment)
     db.commit()
-    return {"id": booking.id, "deadline": booking.deadline.isoformat(), "fixed_price": booking.fixed_price}
+    
+    return {
+        "id": booking.id,
+        "deadline": booking.deadline.isoformat(),
+        "fixed_price": booking.fixed_price
+    }
+
+#Просмотр своих данных
+# Именно эти эндпоинты вызывали ошибку "Not Found" ранее
+
+@app.get("/api/client/bookings")
+def get_client_bookings(request: Request, db: Session = Depends(get_db)):
+    """Получить все заявки текущего клиента"""
+    user_info = get_current_user(request, db)
+    if not user_info or user_info["type"] != "client":
+        raise HTTPException(status_code=403, detail="Требуется авторизация")
+    
+    client = user_info["data"]
+    bookings = db.query(Booking).filter(Booking.client_id == client.id).all()
+    return bookings
+
+@app.get("/api/client/payments")
+def get_client_payments(request: Request, db: Session = Depends(get_db)):
+    """Получить все оплаты текущего клиента"""
+    user_info = get_current_user(request, db)
+    if not user_info or user_info["type"] != "client":
+        raise HTTPException(status_code=403, detail="Требуется авторизация")
+    
+    client = user_info["data"]
+    # Ищем оплаты через связанные бронирования
+    bookings_ids = db.query(Booking.id).filter(Booking.client_id == client.id).all()
+    booking_ids_list = [b[0] for b in bookings_ids]
+    
+    payments = db.query(Payment).filter(Payment.booking_id.in_(booking_ids_list)).all()
+    return payments
+
+#Админ
 
 @app.get("/api/admin/bookings")
-def get_pending_bookings(db: Session = Depends(get_db)):
-    return db.query(Booking).filter(Booking.status == "pending").all()
+def get_admin_bookings(db: Session = Depends(get_db)):
+    """Получить все заявки для администратора"""
+    return db.query(Booking).all()
 
 @app.post("/api/admin/bookings/{booking_id}/approve")
 def approve_booking(booking_id: int, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
+    
     booking.status = "approved"
     db.commit()
-    return {"message": "Одобрено"}
+    return {"message": "Заявка одобрена"}
 
 @app.post("/api/admin/bookings/{booking_id}/reject")
 def reject_booking(booking_id: int, reason: str = Form(...), db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
+    
     booking.status = "rejected"
     booking.rejection_reason = reason
     db.commit()
-    return {"message": "Отклонено"}
+    return {"message": "Заявка отклонена"}
 
 @app.patch("/api/admin/rooms/{room_id}")
-def update_room(room_id: int, new_price: Optional[float] = None, is_active: Optional[bool] = None, db: Session = Depends(get_db)):
+def update_room(
+    room_id: int, 
+    new_price: Optional[float] = None, 
+    is_active: Optional[bool] = None, 
+    db: Session = Depends(get_db)
+):
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(status_code=404, detail="Номер не найден")
+    
     if new_price is not None:
         room.price = new_price
     if is_active is not None:
         room.is_active = is_active
+    
     db.commit()
-    return {"message": "Обновлено"}
+    return {"message": "Номер обновлен"}
 
-@app.post("/api/payments/{booking_id}")
-def pay_booking(booking_id: int, request: Request = None, db: Session = Depends(get_db)):
+# === ОПЛАТА (ЗАГЛУШКА) ===
+
+@app.post("/api/payments/{booking_id}/pay")
+def pay_booking_stub(booking_id: int, request: Request, db: Session = Depends(get_db)):
+    """Заглушка оплаты (меняет статус на paid)"""
     user_info = get_current_user(request, db)
     if not user_info or user_info["type"] != "client":
         raise HTTPException(status_code=403, detail="Требуется авторизация")
+    
     payment = db.query(Payment).filter(Payment.booking_id == booking_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Оплата не найдена")
-    if payment.status == "expired":
+    
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    
+    # Проверка дедлайна
+    if datetime.now() > booking.deadline:
+        payment.status = "expired"
+        booking.status = "expired"
+        db.commit()
         raise HTTPException(status_code=400, detail="Срок оплаты истёк")
+    
+    # Успешная оплата
     payment.status = "paid"
     payment.date_pay = datetime.now()
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
     booking.status = "paid"
     db.commit()
-    return {"message": "Оплачено"}
+    
+    return {"message": "Оплата прошла успешно"}

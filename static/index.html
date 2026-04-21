@@ -11,19 +11,27 @@
         <h2>Вход / Регистрация</h2>
         <input type="text" id="login" placeholder="Логин">
         <input type="password" id="password" placeholder="Пароль">
-        <input type="text" id="full_name" placeholder="ФИО (для регистрации)" style="display:none">
-        <input type="text" id="phone" placeholder="Телефон (для регистрации)" style="display:none">
+        <div id="register-fields" style="display:none">
+            <input type="text" id="full_name" placeholder="ФИО">
+            <input type="text" id="phone" placeholder="Телефон">
+        </div>
         <button onclick="login()">Войти</button>
-        <button onclick="toggleRegister()">Зарегистрироваться</button>
+        <button onclick="toggleRegister()">Показать регистрацию</button>
+        <button id="register-btn" onclick="register()" style="display:none">Зарегистрироваться</button>
     </div>
     
-    <div id="client" style="display:none">
-        <h2>Доступные номера</h2>
-        <div id="rooms"></div>
-        <h2>Мои заявки</h2>
-        <div id="my_bookings"></div>
-        <button onclick="logout()">Выйти</button>
-    </div>
+<div id="client" style="display:none">
+    <h2>Доступные номера</h2>
+    <div id="rooms"></div>
+    
+    <h2>Мои заявки</h2>
+    <div id="my_bookings">Загрузка...</div>
+    
+    <h2>Мои оплаты</h2>
+    <div id="my_payments">Загрузка...</div>
+    
+    <button onclick="logout()">Выйти</button>
+</div>
 
     <script src="/static/app.js"></script>
 </body>
