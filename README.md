@@ -35,5 +35,5 @@
 *   `static/` — фронтенд (HTML, CSS, JS, Картинки).
 
 ## Диаграммы
-*   **DFD:** `diagrams/DFD_Booking_System.svg`
-*   **UML:** `diagrams/UML_Task2.svg`
+*   **DFD:** `diagrams/DFD_Booking_System.jpg`
+*   **UML:** `diagrams/UML_Task2.png`
